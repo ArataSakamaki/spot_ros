@@ -6,6 +6,7 @@ from geometry_msgs.msg import TransformStamped
 from sensor_msgs.msg import Image, CameraInfo
 from sensor_msgs.msg import JointState
 from geometry_msgs.msg import TwistWithCovarianceStamped
+from nav_msgs.msg import Odometry
 
 from spot_msgs.msg import Metrics
 from spot_msgs.msg import LeaseArray, LeaseResource
@@ -245,6 +246,24 @@ def GetOdomTwistFromState(state, spot_wrapper):
     twist_odom_msg.twist.twist.angular.y = state.kinematic_state.velocity_of_body_in_odom.angular.y
     twist_odom_msg.twist.twist.angular.z = state.kinematic_state.velocity_of_body_in_odom.angular.z
     return twist_odom_msg
+
+def GetOdomFromState(state, spot_wrapper):
+    odom_msg = Odometry()
+    local_time = spot_wrapper.robotToLocalTime(state.kinematic_state.acquisition_timestamp)
+    odom_state = state.kinematic_state.transforms_snapshot.child_to_parent_edge_map["odom"].parent_tform_child
+
+    odom_msg.header.stamp = rospy.Time(local_time.seconds, local_time.nanos)
+    odom_msg.header.frame_id = "odom"
+    odom_msg.child_frame_id = "gpe"
+    odom_msg.pose.pose.position.x = odom_state.position.x
+    odom_msg.pose.pose.position.y = odom_state.position.y
+    odom_msg.pose.pose.position.z = odom_state.position.z
+    odom_msg.pose.pose.orientation.x = odom_state.rotation.x
+    odom_msg.pose.pose.orientation.y = odom_state.rotation.y
+    odom_msg.pose.pose.orientation.z = odom_state.rotation.z
+    odom_msg.pose.pose.orientation.w = odom_state.rotation.w
+
+    return odom_msg
 
 def GetWifiFromState(state, spot_wrapper):
     """Maps wireless state data from robot state proto to ROS WiFiState message
