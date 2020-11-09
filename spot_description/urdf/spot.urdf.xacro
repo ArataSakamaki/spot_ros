@@ -263,6 +263,13 @@
         <limit effort="1000" velocity="1000.00" lower="-2.7929" upper="-0.257725" />
     </joint>
 
+    <link name="velodyne"/>
+    <joint name="velodyne_link_joint" type="fixed">
+      <origin xyz="-0.3 0 0.2" rpy="0 0 0" />
+      <parent link="base_link" />
+      <child link="velodyne" />
+    </joint>
+
     <!-- Optional custom includes. -->
     <xacro:include filename="$(optenv SPOT_URDF_EXTRAS empty.urdf)" />
 </robot>
