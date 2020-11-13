@@ -19,6 +19,10 @@ from spot_msgs.msg import SystemFault, SystemFaultState
 from spot_msgs.msg import BatteryState, BatteryStateArray
 
 from bosdyn.api import image_pb2
+from bosdyn.client.frame_helpers import ODOM_FRAME_NAME, VISION_FRAME_NAME, get_odom_tform_body, get_vision_tform_body
+
+import numpy as np
+from scipy.spatial.transform import Rotation as Rot
 
 friendly_joint_names = {}
 """Dictionary for mapping BD joint names to more friendly names"""
@@ -86,6 +90,9 @@ def getImageMsg(data, spot_wrapper):
     """
     tf_msg = TFMessage()
     for frame_name in data.shot.transforms_snapshot.child_to_parent_edge_map:
+        if frame_name == "odom" or frame_name == "body":
+            continue
+
         if data.shot.transforms_snapshot.child_to_parent_edge_map.get(frame_name).parent_frame_name:
             transform = data.shot.transforms_snapshot.child_to_parent_edge_map.get(frame_name)
             new_tf = TransformStamped()
@@ -250,18 +257,33 @@ def GetOdomTwistFromState(state, spot_wrapper):
 def GetOdomFromState(state, spot_wrapper):
     odom_msg = Odometry()
     local_time = spot_wrapper.robotToLocalTime(state.kinematic_state.acquisition_timestamp)
-    odom_state = state.kinematic_state.transforms_snapshot.child_to_parent_edge_map["odom"].parent_tform_child
+    odom_tform_body = get_odom_tform_body(state.kinematic_state.transforms_snapshot)
+
+    r = Rot.from_quat([odom_tform_body.rotation.x,
+                       odom_tform_body.rotation.y,
+                       odom_tform_body.rotation.z,
+                       odom_tform_body.rotation.w])
+
+    Rz = np.array(([np.cos(-1.57), -np.sin(-1.57), 0],
+                   [np.sin(-1.57),  np.cos(-1.57), 0],
+                   [           0,             0,   1]))
+
+    r_matrix = r.as_matrix()
+    result_r = np.dot(r_matrix, Rz)
+
+    r = Rot.from_matrix(result_r)
+    quat = r.as_quat()
 
     odom_msg.header.stamp = rospy.Time(local_time.seconds, local_time.nanos)
     odom_msg.header.frame_id = "odom"
-    odom_msg.child_frame_id = "gpe"
-    odom_msg.pose.pose.position.x = odom_state.position.x
-    odom_msg.pose.pose.position.y = odom_state.position.y
-    odom_msg.pose.pose.position.z = odom_state.position.z
-    odom_msg.pose.pose.orientation.x = odom_state.rotation.x
-    odom_msg.pose.pose.orientation.y = odom_state.rotation.y
-    odom_msg.pose.pose.orientation.z = odom_state.rotation.z
-    odom_msg.pose.pose.orientation.w = odom_state.rotation.w
+    odom_msg.child_frame_id = "body"
+    odom_msg.pose.pose.position.x = odom_tform_body.position.y
+    odom_msg.pose.pose.position.y = -odom_tform_body.position.x
+    odom_msg.pose.pose.position.z = odom_tform_body.position.z
+    odom_msg.pose.pose.orientation.x = quat[0]
+    odom_msg.pose.pose.orientation.y = quat[1]
+    odom_msg.pose.pose.orientation.z = quat[2]
+    odom_msg.pose.pose.orientation.w = quat[3]
 
     return odom_msg
 
@@ -309,6 +331,74 @@ def GetTFFromState(state, spot_wrapper):
             new_tf.transform.rotation.z = transform.parent_tform_child.rotation.z
             new_tf.transform.rotation.w = transform.parent_tform_child.rotation.w
             tf_msg.transforms.append(new_tf)
+
+    return tf_msg
+
+def GetTFFromStateStartOdom(state, spot_wrapper):
+    """Maps robot link state data from robot state proto to ROS TFMessage message
+
+    Args:
+        data: Robot State proto
+        spot_wrapper: A SpotWrapper object
+    Returns:
+        TFMessage message
+    """
+    tf_msg = TFMessage()
+    for frame_name in state.kinematic_state.transforms_snapshot.child_to_parent_edge_map:
+        if state.kinematic_state.transforms_snapshot.child_to_parent_edge_map.get(frame_name).parent_frame_name: #without body
+            transform = state.kinematic_state.transforms_snapshot.child_to_parent_edge_map.get(frame_name)
+            if frame_name == "odom":
+                odom_tform_body = get_odom_tform_body(state.kinematic_state.transforms_snapshot)
+                new_tf = TransformStamped()
+                local_time = spot_wrapper.robotToLocalTime(state.kinematic_state.acquisition_timestamp)
+                new_tf.header.stamp = rospy.Time(local_time.seconds, local_time.nanos)
+                new_tf.header.frame_id = "odom"
+                new_tf.child_frame_id = "body"
+
+                new_tf.transform.translation.x = odom_tform_body.position.y
+                new_tf.transform.translation.y = -odom_tform_body.position.x
+                new_tf.transform.translation.z = odom_tform_body.position.z
+
+                r = Rot.from_quat([odom_tform_body.rotation.x,
+                                   odom_tform_body.rotation.y,
+                                   odom_tform_body.rotation.z,
+                                   odom_tform_body.rotation.w])
+
+                Rz = np.array(([np.cos(-1.57), -np.sin(-1.57), 0],
+                               [np.sin(-1.57),  np.cos(-1.57), 0],
+                               [           0,             0,   1]))
+
+                r_matrix = r.as_matrix()
+                result_r = np.dot(r_matrix, Rz)
+
+                r = Rot.from_matrix(result_r)
+                quat = r.as_quat()
+
+                new_tf.transform.rotation.x = quat[0]
+                new_tf.transform.rotation.y = quat[1]
+                new_tf.transform.rotation.z = quat[2]
+                new_tf.transform.rotation.w = quat[3]
+
+                tf_msg.transforms.append(new_tf)
+
+            elif frame_name == "body":
+                continue
+
+            else:
+                new_tf = TransformStamped()
+                local_time = spot_wrapper.robotToLocalTime(state.kinematic_state.acquisition_timestamp)
+                new_tf.header.stamp = rospy.Time(local_time.seconds, local_time.nanos)
+                new_tf.header.frame_id = transform.parent_frame_name
+                new_tf.child_frame_id = frame_name
+                new_tf.transform.translation.x = transform.parent_tform_child.position.x
+                new_tf.transform.translation.y = transform.parent_tform_child.position.y
+                new_tf.transform.translation.z = transform.parent_tform_child.position.z
+                new_tf.transform.rotation.x = transform.parent_tform_child.rotation.x
+                new_tf.transform.rotation.y = transform.parent_tform_child.rotation.y
+                new_tf.transform.rotation.z = transform.parent_tform_child.rotation.z
+                new_tf.transform.rotation.w = transform.parent_tform_child.rotation.w
+
+                tf_msg.transforms.append(new_tf)
 
     return tf_msg
 

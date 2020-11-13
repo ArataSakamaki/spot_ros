@@ -58,7 +58,8 @@ class SpotROS():
             self.joint_state_pub.publish(joint_state)
 
             ## TF ##
-            tf_msg = GetTFFromState(state, self.spot_wrapper)
+            #tf_msg = GetTFFromState(state, self.spot_wrapper)
+            tf_msg = GetTFFromStateStartOdom(state, self.spot_wrapper)
             if len(tf_msg.transforms) > 0:
                 self.tf_pub.publish(tf_msg)
 
